@@ -1,118 +1,199 @@
-import numpy as np
-import argparse
-import pyedflib
-import scipy.io
-from scipy.spatial import Delaunay
-from scipy.interpolate import griddata
-from scipy import interpolate
-import matplotlib.pyplot as plt
-from mne.viz import plot_topomap
-
 class edf_topoplot(object):
 
-	def __init__(self,):
+	def __init__(self):
 		super(edf_topoplot, self).__init__()
 
+	#elabora variables de entrada
 	def argparse(self):
+		import argparse
 		parser = argparse.ArgumentParser()
-		parser.add_argument('-i','--archivo', help='nombre del archivo .edf que desea utilizar',type = str)
-		parser.add_argument('-o','--figure', help='ingresa la direccion para guardar el topoplot')
-		parser.add_argument('-c','--config', help='nombre del archivo de configuracion. NOTA: el nombre de la variable debe ser elec')
+		parser.add_argument('-i','--archive', 
+			help='nombre del archivo .edf que desea utilizar',type = str)
+		parser.add_argument('-o','--figure', 
+			help='ingresa la direccion para guardar el topoplot')
+		parser.add_argument('-c','--config',
+		 	help='nombre del archivo de configuracion. NOTA: el nombre de la variable debe ser elec')
 		parsedargs = parser.parse_args()
-		arc = parsedargs.archivo
+		archi = parsedargs.archive
 		output = parsedargs.figure
 		config  = parsedargs.config
-		return arc, output, config
+		if archi is None:			archi= 'sujeto_base.edf'
+		if output is None:		output = 'fig3'
+		if config is None:		config = 'config'
+		return archi, output, config
+
+	#lee el archivo config, y elabora lista de etiquetas y de coordenadas de electrodos
+	def preparate_ref(self,config):
+		import numpy as np
+		import scipy.spatial.distance as sp
+		config_file = __import__(config)
+		# organiza la lista de etiquetas de referencia para ser comparada		
+		lab_ref_list = config_file.labels
+		label_ref_list = []
+		for lab_ref in lab_ref_list:
+			label_ref = lab_ref.upper()
+			label_ref_list.append(label_ref)
+
+		# organiza las coordenadas de los electrodos que serán referencia
+		elec = config_file.elec
+		cz = label_ref_list.index('CZ')
+		iz = label_ref_list.index('IZ')
+		cz = elec[cz]
+		iz = elec[iz]
+		cz_iz = np.vstack((cz,iz))
+		radius = sp.pdist(cz_iz)
+		new_elec = np.zeros(shape=(0,2))
+		new_labels_ref = []
+		for lab_ref in label_ref_list:
+			m = label_ref_list.index(lab_ref)
+			coord = elec[m]
+			YY = np.vstack((cz,coord))
+			dist = sp.pdist(YY)
+			if dist < radius:
+				new_labels_ref.append(lab_ref)
+				new_elec = np.vstack((new_elec,coord))
+
+		return new_elec,new_labels_ref,cz,radius
 
 	#lee el archivo .edf y extrae la informacion principal
-	def read_edf(self,arc):
-
-		edf = pyedflib.EdfReader(arc)#archivo edf
-		channels_labels = edf.getSignalLabels() #etiquetas de los canales	
-		nsig = edf.getNSamples()[0] #longitud de la toma		
-		nch  = edf.signals_in_file #numero de canales		
+	def read_edf(self,archi):
+		import numpy as np
+		import pyedflib
+		edf = pyedflib.EdfReader(archi)			#archivo edf
+		channels_labels = edf.getSignalLabels()	#etiquetas de los electrodos	
+		nsig = edf.getNSamples()[0] 			#longitud de la toma		
+		nch  = edf.signals_in_file				#numero de canales		
 		signal = np.zeros((nch,nsig))
-		for x in range(nch):
-			signal[x,:] = edf.readSignal(x)	
+		for i in range(nch):
+			signal[i,:] = edf.readSignal(i)	
 		return signal,nch,channels_labels
 
 	#calcula la potencia y las posiciones de los electrodos
 	def calc_power(self,signal):
+		import numpy as np
 		magnitud = signal**2	#magnitud
 		pot_signal = np.mean(magnitud,axis=1) #potencia de la senal
-		# print('vector de potencias')
-		# print(pot_signal)
 		return pot_signal
 
-	def calc_positions(self,config,channels_labels,nch,pot_signal):
-		config_file = __import__(config)
-		elec = config_file.elec 		#coordenadas de los electrodos de referencia
-		lab_ref_list = config_file.labels	#lista etiquetas de referencia
-		label_ref_list = []
-
-		# #organiza la lista de etiquetas de referencia para ser comparada
-		for lab_ref in lab_ref_list:
-			label_ref = lab_ref.upper()
-			label_ref_list.append(label_ref)
+	def calc_positions(self,nch,channels_labels,elec,label_ref_list,pot_signal):
+		import numpy as np
 		count = 0
-		counter = -1
 		pos = np.zeros(shape=(nch,2))
 
-		#organiza la lista de etiquetas de la medicion para ser comparada
+		# organiza la lista de etiquetas de la medicion para ser comparada
 		for lab in channels_labels:
 			labe = lab.upper()
 			label1 = labe.find('-')
 			label = labe[0:label1]
+			if label == 'T1':	label = 'FT9'
+			if label == 'T2':	label = 'FT10'
+			if label == 'T3':	label = 'T7'
+			if label == 'T4':	label = 'T8'
+			if label == 'T5':	label = 'P7'
+			if label == 'T6':	label = 'P8'
+
 			exist = label in label_ref_list
 
 			#crea un np.ndarray con las coordenadas de los electrodos existentes en la medida
 			if exist is True:
-				point = label_ref_list.index(label)
-				coord = elec[point]
+				coord = elec[label_ref_list.index(label)]
 				pos[count,:] = coord
-				# coord = np.asarray(coord)
 			count += 1
-		
-		#elimina los electrodos que no fueron encontrados en la lista de referencia	
-		for coord in pos:
-			counter += 1
+		count = 0
+
+		#elimina la informacion de los electrodos que no fueron encontrados en la lista de referencia	
+		for coord in pos:			
 			check = np.array_equal(coord,[0.,0.])
 			if check is True:
-				pos = np.delete(pos,counter,0)
-				pot_signal = np.delete(pot_signal,counter,0)
-				counter += -1
-		# print('posicion de los nodos')
-		# print(pos)
-		return pos,pot_signal,elec
+				pos = np.delete(pos,count,0)
+				pot_signal = np.delete(pot_signal,count,0)
+				channels_labels = np.delete(channels_labels,count,0)
+				count += -1
+			count += 1
+		return pos,pot_signal,channels_labels
+
+	def circle(self,pos,cz,radius):
+		import numpy as np
+		import math as mt
+		for theta in range(100):
+			arc = 2*mt.pi/100*theta
+			x = cz[0] + radius*mt.cos(arc)
+			y = cz[1] + radius*mt.sin(arc)
+			coord = np.asarray([x,y])
+			coord = coord.T
+			pos = np.vstack((pos,coord))
+		pos_interp = np.copy(pos)
+		return pos_interp
+
+	def interpolation(self,pot_signal,pos,elec):
+		import matplotlib.pyplot as plt
+		from scipy.interpolate import griddata
+
+		pot_interp = griddata(pos, pot_signal,elec, method='cubic',fill_value =0)
+		print(pot_interp)
+		plt.scatter(elec[:,0],elec[:,1])
+		plt.show()
+		return pot_interp
 
 	#elabora el topoplot
-	def topoplot(self,pot_signal,pos):
-
+	def topoplot(self,pot_signal,pos,channels_labels):
+		from mne.viz import plot_topomap
+		import matplotlib.pyplot as plt
+		print(len(pot_signal))
+		print(pos.shape)
+		print(len(channels_labels))
+		minn = min(pot_signal)
+		maxx = max(pot_signal)
 		plt.title('topomap')
-		fig = plot_topomap(pot_signal, pos, cmap='jet', sensors='k.', names=channels_labels, show_names=False,
-				contours=0, image_interp='spline36' ,show = False)
+		fig = plot_topomap(pot_signal, pos, cmap='jet', sensors='k.', names=channels_labels, show_names=True,
+				contours=0, image_interp='spline36' ,show = False,vmin = minn, vmax = maxx)
 		# plt.savefig(output)
 		plt.show(fig)
 		return fig
 
-	def mesh(self,pos,elec):
-		# malla de los electrodos de la muestra
+	def mesh(self,pos):		
+		from scipy.spatial import Delaunay
+		import matplotlib.pyplot as plt
 		tri = Delaunay(pos)
+		faces = tri.simplices
 		plt.triplot(pos[:,0], pos[:,1], tri.simplices)
 		plt.plot(pos[:,0], pos[:,1], 'o')
+		# print(tri)
 		plt.show()
+		return faces
 
-		# malla de los electrodos de New York Head Model
-		tri = Delaunay(elec)
-		plt.triplot(elec[:,0], elec[:,1], tri.simplices)
-		plt.plot(elec[:,0], elec[:,1], 'o')
-		plt.show()
+	def RGB(self,pot_signal):
+		import matplotlib.pyplot as plt
+		import matplotlib.colors as colors
+		import matplotlib.cm as cmx
+		import numpy as np
+		jet = cm = plt.get_cmap('jet')
+		cNorm  = colors.Normalize(vmin=min(pot_signal), vmax=max(pot_signal))
+		scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=jet)
+		colorVal = scalarMap.to_rgba(pot_signal)
+		colorVAl = np.around(255*colorVal)
+		return colorVAl
 
-if __name__ == '__main__':
-	ob = edf_topoplot()
-	arc,output,config = ob.argparse()
-	signal,nch,channels_labels = ob.read_edf(arc)
-	pot_signal = ob.calc_power(signal)
-	pos, pot_signal, elec= ob.calc_positions(config,channels_labels,nch,pot_signal)
-	fig = ob.topoplot(pot_signal,pos)
-	_ = ob.mesh(pos,elec)
+	def write_ply(self,ply_file,vertex,faces,colorVal):
+		import numpy as np
+		vertex_colorVal = np.hstack((vertex,colorVal))
+		file = open(ply_file+".ply","w")
+		file.write('''ply
+			format ascii 1.0
+			element vertex %d
+			property float x
+			property float y
+			property float z
+			property uchar red
+			property uchar green
+			property uchar blue
+			element face %d
+			property list uchar int vertex_index
+			end_header\n'''
+		%(len(vertex),len(faces)))
+		for row in vertex_colorVal:
+			file.write('%f %f %f %i %i %i \n' %(row[0],row[1], 0,row[2],row[3],row[4]))
+		for row in faces:
+			file.write('3 %i %i %i \n' %(row[0],row[1],row[2]))
+		file.close()
+		return file
