@@ -3,27 +3,29 @@ class edf_topoplot(object):
 	def __init__(self):
 		super(edf_topoplot, self).__init__()
 
-	#elabora variables de entrada
-	def argparse(self):
-		import argparse
-		parser = argparse.ArgumentParser()
-		parser.add_argument('-i','--archive', 
-			help='nombre del archivo .edf que desea utilizar',type = str)
-		parser.add_argument('-o','--figure', 
-			help='ingresa la direccion para guardar el topoplot')
-		parser.add_argument('-c','--config',
-		 	help='nombre del archivo de configuracion. NOTA: el nombre de la variable debe ser elec')
-		parsedargs = parser.parse_args()
-		archi = parsedargs.archive
-		output = parsedargs.figure
-		config  = parsedargs.config
-		if archi is None:			archi= 'sujeto_base.edf'
-		if output is None:		output = 'fig3'
-		if config is None:		config = 'config'
-		return archi, output, config
+	#lee el archivo .edf y extrae la informacion principal
+	def read_edf(self,archi):
+		import numpy as np
+		import pyedflib
+		from pyedflib import EdfWriter
+		edf = pyedflib.EdfReader(archi)
+		channels_labels = edf.getSignalLabels()	
+		nsig = edf.getNSamples()[0]
+		nch  = edf.signals_in_file			
+		signal = np.zeros((nch,nsig))
+		for i in range(nch):
+			signal[i,:] = edf.readSignal(i)
+		return signal,nch,channels_labels
+
+	#calcula la potencia y las posiciones de los electrodos
+	def power(self,signal):
+		import numpy as np
+		power = signal**2
+		power = np.mean(power,axis=1) #potencia de la senal
+		return power
 
 	#lee el archivo config, y elabora lista de etiquetas y de coordenadas de electrodos
-	def preparate_ref(self,config):
+	def prepare(self,config):
 		import numpy as np
 		import scipy.spatial.distance as sp
 		config_file = __import__(config)
@@ -55,27 +57,8 @@ class edf_topoplot(object):
 
 		return new_elec,new_labels_ref,cz,radius
 
-	#lee el archivo .edf y extrae la informacion principal
-	def read_edf(self,archi):
-		import numpy as np
-		import pyedflib
-		edf = pyedflib.EdfReader(archi)			#archivo edf
-		channels_labels = edf.getSignalLabels()	#etiquetas de los electrodos	
-		nsig = edf.getNSamples()[0] 			#longitud de la toma		
-		nch  = edf.signals_in_file				#numero de canales		
-		signal = np.zeros((nch,nsig))
-		for i in range(nch):
-			signal[i,:] = edf.readSignal(i)	
-		return signal,nch,channels_labels
 
-	#calcula la potencia y las posiciones de los electrodos
-	def calc_power(self,signal):
-		import numpy as np
-		magnitud = signal**2	#magnitud
-		pot_signal = np.mean(magnitud,axis=1) #potencia de la senal
-		return pot_signal
-
-	def calc_positions(self,nch,channels_labels,elec,label_ref_list,pot_signal):
+	def positions(self,nch,channels_labels,elec,label_ref_list,pot_signal):
 		import numpy as np
 		count = 0
 		pos = np.zeros(shape=(nch,2))
@@ -111,6 +94,27 @@ class edf_topoplot(object):
 				count += -1
 			count += 1
 		return pos,pot_signal,channels_labels
+	
+	#elabora el topoplot
+	def plot_topomap(self,pot_signal,pos):
+		from mne.viz import plot_topomap
+		import matplotlib.pyplot as plt
+		minn = min(pot_signal)
+		maxx = max(pot_signal)
+		plt.title('topomap')
+		fig = plot_topomap(pot_signal, pos, cmap='jet', sensors='k.',contours=0, 
+			image_interp='spline36' ,show = False,vmin = minn, vmax = maxx)
+		# plt.savefig(output)
+		plt.show(fig)
+		return fig
+
+	def interpolation_object(self,pot_signal,pos,elec):
+		import matplotlib.pyplot as plt
+		from scipy.interpolate import griddata
+		pot_interp = griddata(pos, pot_signal,elec, method='cubic',fill_value =0)
+		# plt.scatter(elec[:,0],elec[:,1])
+		# plt.show()
+		return pot_interp
 
 	def circle(self,pos,cz,radius):
 		import numpy as np
@@ -125,41 +129,14 @@ class edf_topoplot(object):
 		pos_interp = np.copy(pos)
 		return pos_interp
 
-	def interpolation(self,pot_signal,pos,elec):
-		import matplotlib.pyplot as plt
-		from scipy.interpolate import griddata
-
-		pot_interp = griddata(pos, pot_signal,elec, method='cubic',fill_value =0)
-		print(pot_interp)
-		plt.scatter(elec[:,0],elec[:,1])
-		plt.show()
-		return pot_interp
-
-	#elabora el topoplot
-	def topoplot(self,pot_signal,pos,channels_labels):
-		from mne.viz import plot_topomap
-		import matplotlib.pyplot as plt
-		print(len(pot_signal))
-		print(pos.shape)
-		print(len(channels_labels))
-		minn = min(pot_signal)
-		maxx = max(pot_signal)
-		plt.title('topomap')
-		fig = plot_topomap(pot_signal, pos, cmap='jet', sensors='k.', names=channels_labels, show_names=True,
-				contours=0, image_interp='spline36' ,show = False,vmin = minn, vmax = maxx)
-		# plt.savefig(output)
-		plt.show(fig)
-		return fig
-
 	def mesh(self,pos):		
 		from scipy.spatial import Delaunay
 		import matplotlib.pyplot as plt
 		tri = Delaunay(pos)
 		faces = tri.simplices
-		plt.triplot(pos[:,0], pos[:,1], tri.simplices)
-		plt.plot(pos[:,0], pos[:,1], 'o')
-		# print(tri)
-		plt.show()
+		# plt.triplot(pos[:,0], pos[:,1], tri.simplices)
+		# plt.plot(pos[:,0], pos[:,1], 'o')
+		# plt.show()
 		return faces
 
 	def RGB(self,pot_signal):
@@ -197,3 +174,28 @@ class edf_topoplot(object):
 			file.write('3 %i %i %i \n' %(row[0],row[1],row[2]))
 		file.close()
 		return file
+
+	def interpolation(self,power,pos):
+		import numpy as np
+		import matplotlib.pyplot as plt
+		from scipy.interpolate import interp2d
+		x = np.linspace(-0.33,0.33,500)
+		y = np.linspace(-0.33,0.33,500)
+
+		power = interp2d(pos[:,0], pos[:,1], power,kind = 'linear')
+		power = power(x,y)
+		return power
+
+	def turnoff(self,power,cz,radius):
+		import numpy as np
+		import scipy.spatial.distance as sp
+		x = np.linspace(-0.36,0.36,500)
+		y = np.linspace(-0.36,0.36,500)
+		for m in range(len(x)):
+			for n in range(len(y)):
+				YY = np.vstack((cz,[x[m],y[n]]))
+				dist = sp.pdist(YY)
+				if dist >= radius:
+					c = (m,n)
+					power[c] = float('nan')
+		return power
