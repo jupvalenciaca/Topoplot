@@ -19,7 +19,7 @@ formatt = parsedargs.formatt
 if archi is None:		archi= 'sujeto_base.edf'
 if output is None:		output = 'topoplot'
 if config is None:		config = 'config'
-if formatt is None:		formatt = 'data'
+if formatt is None:		formatt = 'image'
 
 ob = edf_topoplot()
 
@@ -37,7 +37,7 @@ pos,power,labels= ob.positions(nch,labels,elec,labels_ref,power)
 
 if formatt == 'image':
 	# topoplot utilizando biblioteca mne
-	fig = ob.plot_topomap(power,pos)
+	fig = ob.plot_topomap(output,power,pos)
 
 if formatt == 'object':
 	# interpolacion con los electrodos de referencia
@@ -58,13 +58,14 @@ if formatt == 'data':
 	import matplotlib.pyplot as plt
 	pos[:,1] = pos[:,1] - center[1]
 	center = [0,0]
-	x = np.linspace(-0.33,0.33,500)
-	y = np.linspace(-0.33,0.33,500)
+	x = np.linspace(-0.33,0.33,600)
+	y = np.linspace(-0.33,0.33,600)
 
-	power_interp = ob.interpolation(power,pos)
+	power_interp = ob.interpolation_data(power,pos)
 	power_interp = ob.turnoff(power_interp,center,radius)
 	im = plt.pcolormesh(x,y,power_interp, 
 		vmin=np.min(power),vmax=np.max(power),cmap = 'jet')
 	plt.scatter(pos[:,0],pos[:,1],c = 'k')
 	plt.colorbar(im)
+	np.save(output,power_interp)
 	plt.show()
