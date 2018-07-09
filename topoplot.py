@@ -96,7 +96,7 @@ class edf_topoplot(object):
 		return pos,pot_signal,channels_labels
 	
 	#elabora el topoplot
-	def plot_topomap(self,pot_signal,pos):
+	def plot_topomap(self,output,pot_signal,pos):
 		from mne.viz import plot_topomap
 		import matplotlib.pyplot as plt
 		minn = min(pot_signal)
@@ -104,7 +104,7 @@ class edf_topoplot(object):
 		plt.title('topomap')
 		fig = plot_topomap(pot_signal, pos, cmap='jet', sensors='k.',contours=0, 
 			image_interp='spline36' ,show = False,vmin = minn, vmax = maxx)
-		# plt.savefig(output)
+		plt.savefig(output)
 		plt.show(fig)
 		return fig
 
@@ -112,8 +112,6 @@ class edf_topoplot(object):
 		import matplotlib.pyplot as plt
 		from scipy.interpolate import griddata
 		pot_interp = griddata(pos, pot_signal,elec, method='cubic',fill_value =0)
-		# plt.scatter(elec[:,0],elec[:,1])
-		# plt.show()
 		return pot_interp
 
 	def circle(self,pos,cz,radius):
@@ -134,9 +132,6 @@ class edf_topoplot(object):
 		import matplotlib.pyplot as plt
 		tri = Delaunay(pos)
 		faces = tri.simplices
-		# plt.triplot(pos[:,0], pos[:,1], tri.simplices)
-		# plt.plot(pos[:,0], pos[:,1], 'o')
-		# plt.show()
 		return faces
 
 	def RGB(self,pot_signal):
@@ -175,12 +170,12 @@ class edf_topoplot(object):
 		file.close()
 		return file
 
-	def interpolation(self,power,pos):
+	def interpolation_data(self,power,pos):
 		import numpy as np
 		import matplotlib.pyplot as plt
 		from scipy.interpolate import interp2d
-		x = np.linspace(-0.33,0.33,500)
-		y = np.linspace(-0.33,0.33,500)
+		x = np.linspace(-0.33,0.33,600)
+		y = np.linspace(-0.33,0.33,600)
 
 		power = interp2d(pos[:,0], pos[:,1], power,kind = 'linear')
 		power = power(x,y)
@@ -189,8 +184,8 @@ class edf_topoplot(object):
 	def turnoff(self,power,cz,radius):
 		import numpy as np
 		import scipy.spatial.distance as sp
-		x = np.linspace(-0.36,0.36,500)
-		y = np.linspace(-0.36,0.36,500)
+		x = np.linspace(-0.36,0.36,600)
+		y = np.linspace(-0.36,0.36,600)
 		for m in range(len(x)):
 			for n in range(len(y)):
 				YY = np.vstack((cz,[x[m],y[n]]))
